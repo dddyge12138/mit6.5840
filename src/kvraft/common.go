@@ -60,4 +60,5 @@ type Task struct {
 	StartTime 	time.Time
 	// 任务的状态 0 表示未分配， 1 表示已分配未执行完毕, 2表示执行完成
 	Status 		int
+	NReduce 	int
 }

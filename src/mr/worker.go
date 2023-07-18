@@ -2,43 +2,94 @@ package mr
 
 import (
 	"6.5840/kvraft"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"time"
 )
 import "log"
 import "net/rpc"
 import "hash/fnv"
 
-//
 // Map functions return a slice of KeyValue.
-//
 type KeyValue struct {
 	Key   string
 	Value string
 }
 
-//
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
+
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
-//
 func ihash(key string) int {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+func doMap(job kvraft.Task, mapf func(string, string) []KeyValue) {
+	file, err := os.Open(job.FileName)
+	defer file.Close()
+	if err != nil {
+		log.Fatalf("Cannot open file %v", job.FileName)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatalf("Cannot read file %v", job.FileName)
+	}
+	kva := mapf(job.FileName, string(content))
 
-//
+	// TODO 排序kva, 遍历kva, 按键哈希后丢到文件中
+	// 1 => 排序
+	sort.Sort(ByKey(kva))
+
+	// 2 => 遍历
+	hm := map[int][]KeyValue{}
+	for _, v := range kva {
+		fileIdx := ihash(v.Key) % job.NReduce
+		hm[fileIdx] = append(hm[fileIdx], v)
+	}
+
+	// 3 => 对哈希表遍历
+	for fileIdx, vArr := range hm {
+		middleFileName := fmt.Sprintf("mr-%d-%d", job.Id, fileIdx)
+		f, err := os.CreateTemp("", middleFileName)
+		defer func() {
+			os.Rename(f.Name(), middleFileName)
+			os.Remove(f.Name())
+		}()
+		if err != nil {
+			log.Fatalf("创建中间文件失败, %s", err)
+		}
+
+		// 写入中间文件
+		enc := json.NewEncoder(f)
+		for _, v := range vArr {
+			err := enc.Encode(&v)
+			if err != nil {
+				log.Fatalf("写入中间文件失败, %s", err)
+			}
+		}
+	}
+
+	// TODO 4 => 全部执行成功了, 请求RPC接口报告成功完成任务
+}
+
 // main/mrworker.go calls this function.
-//
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
 
-	/**		开始索取任务 			**/
+	/**  开始索取任务    **/
 	// 1 => 轮训请求任务, 如果没有任务就睡眠, 按照任务类型执行不同的行为
 	for {
 		reply, err := CallTask()
@@ -50,6 +101,10 @@ func Worker(mapf func(string, string) []KeyValue,
 		case 1:
 			log.Println("我拿到Map任务啦")
 			// TODO 执行Map任务
+			doMap(reply.Job, mapf)
+			fmt.Println("执行完了doMap，休息20秒钟继续")
+			time.Sleep(20 * time.Second)
+			break
 		case 2:
 			log.Println("我拿到Reduce任务啦")
 		case 3:
@@ -63,7 +118,6 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 		time.Sleep(1 * time.Second)
 	}
-
 
 	/*****************************/
 
@@ -85,11 +139,9 @@ func CallTask() (*kvraft.HeartbeatResponse, error) {
 	}
 }
 
-//
 // example function to show how to make an RPC call to the coordinator.
 //
 // the RPC argument and reply types are defined in rpc.go.
-//
 func CallExample() {
 
 	// declare an argument structure.
@@ -114,11 +166,9 @@ func CallExample() {
 	}
 }
 
-//
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-//
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	c, err := rpc.DialHTTP("tcp", "localhost:1234")
 	//sockname := coordinatorSock()

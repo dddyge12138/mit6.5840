@@ -151,6 +151,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			FileName: fname,
 			StartTime: time.Now(),
 			Status: 0,
+			NReduce: nReduce,
 		})
 	}
 	c.heartbeatCh = make(chan heartbeatMsg)
