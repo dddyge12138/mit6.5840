@@ -59,11 +59,14 @@ func doMap(job kvraft.Task, mapf func(string, string) []KeyValue) {
 	}
 
 	// 3 => 对哈希表遍历
+	complete := false
 	for fileIdx, vArr := range hm {
 		middleFileName := fmt.Sprintf("mr-%d-%d", job.Id, fileIdx)
 		f, err := os.CreateTemp("", middleFileName)
 		defer func() {
-			os.Rename(f.Name(), middleFileName)
+			if complete {
+				os.Rename(f.Name(), middleFileName)
+			}
 			os.Remove(f.Name())
 		}()
 		if err != nil {
@@ -79,8 +82,13 @@ func doMap(job kvraft.Task, mapf func(string, string) []KeyValue) {
 			}
 		}
 	}
+	complete = true
 
-	// TODO 4 => 全部执行成功了, 请求RPC接口报告成功完成任务
+	// 4 => 全部执行成功了, 请求RPC接口报告成功完成任务
+	err = ReportTask(&kvraft.ReportRequest{JobType: 1, Job: job}, &kvraft.ReportResponse{})
+	if err != nil {
+		log.Fatalf(err.Error())
+	}
 }
 
 // main/mrworker.go calls this function.
@@ -135,7 +143,16 @@ func CallTask() (*kvraft.HeartbeatResponse, error) {
 		return &reply, nil
 	} else {
 		// 请求出错
-		return nil, errors.New("请求Coordinator服务器出错")
+		return nil, errors.New("[CallTask]请求Coordinator服务器出错")
+	}
+}
+
+func ReportTask(req *kvraft.ReportRequest, res *kvraft.ReportResponse) error {
+	err := call("Coordinator.Report", req, res)
+	if err {
+		return nil
+	} else {
+		return errors.New("[ReportTask]请求Coordinator服务器出错")
 	}
 }
 

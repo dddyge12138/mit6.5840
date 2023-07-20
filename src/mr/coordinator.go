@@ -10,32 +10,31 @@ import "net"
 import "net/rpc"
 import "net/http"
 
-
 type Coordinator struct {
 	// Your definitions here.
-	nReduce			int
-	files 			[]string
-	tasks 			[]kvraft.Task
+	nReduce int
+	files   []string
+	tasks   []kvraft.Task
 	// 完成了多少个map任务就+1, 当resMaps == nReduce时, 任务完成, 可以分发Reduce任务
-	resMaps 		int
+	resMaps int
 	// 当resReduce == nReduce说明任务聚合完成, 可以退出Coordinator
-	resReduce 		int
+	resReduce int
 
-	heartbeatCh 	chan heartbeatMsg
-	reportCh 		chan reportMsg
-	doneCh 			chan struct{}
+	heartbeatCh chan heartbeatMsg
+	reportCh    chan reportMsg
+	doneCh      chan struct{}
 }
 
 // 请求任务
 type heartbeatMsg struct {
-	response 		*kvraft.HeartbeatResponse
-	ok 				chan struct{}
+	response *kvraft.HeartbeatResponse
+	ok       chan struct{}
 }
 
 // 报告任务完成
 type reportMsg struct {
-	request 		*kvraft.ReportRequest
-	ok 				chan struct{}
+	request *kvraft.ReportRequest
+	ok      chan struct{}
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -51,6 +50,13 @@ func (c *Coordinator) Report(request *kvraft.ReportRequest, response *kvraft.Rep
 	c.reportCh <- msg
 	<-msg.ok
 	return nil
+}
+
+func TaskPreCheck(job kvraft.Task) bool {
+	if time.Now().Sub(job.StartTime) > 10*time.Second {
+		return false
+	}
+	return true
 }
 
 func (c *Coordinator) schedule() {
@@ -70,6 +76,7 @@ func (c *Coordinator) schedule() {
 				flag := false
 				for _, task := range c.tasks {
 					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10) {
+						task.StartTime = time.Now()
 						res.Job = task
 						res.JobType = 1
 						flag = true
@@ -84,6 +91,23 @@ func (c *Coordinator) schedule() {
 			msg.ok <- struct{}{}
 		case msg := <-c.reportCh:
 			// TODO 完成任务
+			req := msg.request
+			if !TaskPreCheck(req.Job) {
+				msg.ok <- struct{}{}
+				break
+			}
+			if req.JobType == 1 {
+				// Map Task
+				c.tasks[req.Job.Id].Status = 2
+				c.tasks = append(c.tasks, kvraft.Task{
+					Id:       len(c.tasks),
+					FileName: fmt.Sprintf("mr-*-%d", c.resMaps),
+				})
+				c.resMaps++
+			} else if req.JobType == 2 {
+				// TODO Reduce Task
+			}
+
 			msg.ok <- struct{}{}
 		case <-c.doneCh:
 			// 任务完成可以停止了
@@ -94,20 +118,15 @@ func (c *Coordinator) schedule() {
 	}
 }
 
-//
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
-//
 func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
 }
 
-
-//
 // start a thread that listens for RPCs from worker.go
-//
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
@@ -121,24 +140,19 @@ func (c *Coordinator) server() {
 	go http.Serve(l, nil)
 }
 
-//
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
-//
 func (c *Coordinator) Done() bool {
 	ret := false
 
 	// Your code here.
 
-
 	return ret
 }
 
-//
 // create a Coordinator.
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
-//
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
@@ -147,11 +161,10 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.nReduce = nReduce
 	for idx, fname := range files {
 		c.tasks = append(c.tasks, kvraft.Task{
-			Id: idx,
+			Id:       idx,
 			FileName: fname,
-			StartTime: time.Now(),
-			Status: 0,
-			NReduce: nReduce,
+			Status:   0,
+			NReduce:  nReduce,
 		})
 	}
 	c.heartbeatCh = make(chan heartbeatMsg)

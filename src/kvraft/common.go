@@ -37,28 +37,27 @@ type GetReply struct {
 }
 
 type HeartbeatRequest struct {
-
 }
 
 type HeartbeatResponse struct {
 	// 任务类型: 1 map任务。2. reduce任务。3. 睡眠等待任务。4. 退出worker进程任务
-	JobType		int
-	Job 		Task
+	JobType int
+	Job     Task
 }
 
 type ReportRequest struct {
-
+	JobType int
+	Job     Task
 }
 
 type ReportResponse struct {
-
 }
 
 type Task struct {
-	Id 			int
-	FileName 	string
-	StartTime 	time.Time
+	Id        int
+	FileName  string
+	StartTime time.Time
 	// 任务的状态 0 表示未分配， 1 表示已分配未执行完毕, 2表示执行完成
-	Status 		int
-	NReduce 	int
+	Status  int
+	NReduce int
 }
