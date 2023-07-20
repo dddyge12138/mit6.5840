@@ -46,8 +46,10 @@ type HeartbeatResponse struct {
 }
 
 type ReportRequest struct {
-	JobType int
-	Job     Task
+	JobType 		int
+	Job     		Task
+	// Map任务完成时, 回复Coordinator有多少个Reduce File
+	ReduceFileName 	string
 }
 
 type ReportResponse struct {

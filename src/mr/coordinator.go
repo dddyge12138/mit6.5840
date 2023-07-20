@@ -13,9 +13,11 @@ import "net/http"
 type Coordinator struct {
 	// Your definitions here.
 	nReduce int
+	// nMap表示有多少个输入文件, 就有多少个map任务, 当resMaps == nMap时, 发放Reduce任务
+	nMap 	int
 	files   []string
 	tasks   []kvraft.Task
-	// 完成了多少个map任务就+1, 当resMaps == nReduce时, 任务完成, 可以分发Reduce任务
+	// 完成了多少个map任务就+1, 当resMaps == nMap时, 任务完成, 可以分发Reduce任务
 	resMaps int
 	// 当resReduce == nReduce说明任务聚合完成, 可以退出Coordinator
 	resReduce int
@@ -60,22 +62,43 @@ func TaskPreCheck(job kvraft.Task) bool {
 }
 
 func (c *Coordinator) schedule() {
-	fmt.Println("Coordinator开始调度")
+	log.Println("Coordinator开始调度")
 	for {
 		select {
 		case msg := <-c.heartbeatCh:
-			// TODO 请求任务, 不用加锁遍历任务
+			// 请求任务, 不用加锁遍历任务
 			fmt.Println("worker拿到任务了")
 			// 1 => 遍历任务, 查看哪些任务是可以拿去执行的
 			res := msg.response
-			if c.resMaps == c.nReduce {
+			if c.resMaps == c.nMap {
 				// 说明此时任务已经完成, 可以发放reduce任务了
-				fmt.Println("Map任务已完成")
+				fmt.Println("Map任务已全部完成, 发放Reduce任务")
+				// 发放Reduce任务之前, 先检查是否完成了所有的Reduce任务
+				if c.resReduce == c.nReduce {
+					res.JobType = 4
+					log.Println("Reduce任务完成, Coordinator即将退出")
+					msg.ok <- struct{}{}
+					break
+				}
+				flag := false
+				for _, task := range c.tasks[:c.nReduce] {
+					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10 * time.Second) {
+						task.StartTime = time.Now()
+						res.Job = task
+						res.JobType = 2
+						flag = true
+						break
+					}
+				}
+				// 暂时没有任务可以发放, 那就先休眠
+				if !flag {
+					res.JobType = 3
+				}
 			} else {
 				// 发放Map任务
 				flag := false
-				for _, task := range c.tasks {
-					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10) {
+				for _, task := range c.tasks[c.nReduce:] {
+					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10 * time.Second) {
 						task.StartTime = time.Now()
 						res.Job = task
 						res.JobType = 1
@@ -83,7 +106,7 @@ func (c *Coordinator) schedule() {
 						break
 					}
 				}
-				// 没有任务可以发放, 那就先休眠
+				// 暂时没有任务可以发放, 那就先休眠
 				if !flag {
 					res.JobType = 3
 				}
@@ -99,19 +122,14 @@ func (c *Coordinator) schedule() {
 			if req.JobType == 1 {
 				// Map Task
 				c.tasks[req.Job.Id].Status = 2
-				c.tasks = append(c.tasks, kvraft.Task{
-					Id:       len(c.tasks),
-					FileName: fmt.Sprintf("mr-*-%d", c.resMaps),
-				})
 				c.resMaps++
 			} else if req.JobType == 2 {
-				// TODO Reduce Task
+				// Reduce Task
+				c.tasks[req.Job.Id].Status = 2
+				c.resReduce++
 			}
 
 			msg.ok <- struct{}{}
-		case <-c.doneCh:
-			// 任务完成可以停止了
-			break
 		default:
 			time.Sleep(1)
 		}
@@ -146,7 +164,10 @@ func (c *Coordinator) Done() bool {
 	ret := false
 
 	// Your code here.
-
+	select {
+	case <-c.doneCh:
+		ret = true
+	}
 	return ret
 }
 
@@ -159,13 +180,21 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// Your code here.
 	// TODO 初始化一些配置
 	c.nReduce = nReduce
+	for i := 0; i < nReduce; i++ {
+		c.tasks = append(c.tasks, kvraft.Task{
+			Id: i,
+			Status:   0,
+			NReduce:  nReduce,
+		})
+	}
 	for idx, fname := range files {
 		c.tasks = append(c.tasks, kvraft.Task{
-			Id:       idx,
+			Id:       idx + len(c.tasks),
 			FileName: fname,
 			Status:   0,
 			NReduce:  nReduce,
 		})
+		c.nMap++
 	}
 	c.heartbeatCh = make(chan heartbeatMsg)
 	c.reportCh = make(chan reportMsg)
