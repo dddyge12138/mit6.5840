@@ -4,6 +4,7 @@ import (
 	"6.5840/kvraft"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 )
 import "net"
@@ -14,41 +15,46 @@ type Coordinator struct {
 	// Your definitions here.
 	nReduce int
 	// nMap表示有多少个输入文件, 就有多少个map任务, 当resMaps == nMap时, 发放Reduce任务
-	nMap 	int
-	files   []string
-	tasks   []kvraft.Task
+	nMap  int
+	files []string
+	tasks []kvraft.Task
 	// 完成了多少个map任务就+1, 当resMaps == nMap时, 任务完成, 可以分发Reduce任务
 	resMaps int
 	// 当resReduce == nReduce说明任务聚合完成, 可以退出Coordinator
 	resReduce int
 
-	heartbeatCh chan heartbeatMsg
-	reportCh    chan reportMsg
-	doneCh      chan struct{}
+	// Worker Map
+	WorkersExistMap map[string]time.Time
+	mapMutex        sync.Mutex
+	heartbeatCh     chan heartbeatMsg
+	reportCh        chan reportMsg
+	doneCh          chan struct{}
 }
 
 // 请求任务
 type heartbeatMsg struct {
-	response *kvraft.HeartbeatResponse
-	ok       chan struct{}
+	response   *kvraft.HeartbeatResponse
+	ok         chan struct{}
+	WorkerUUID string
 }
 
 // 报告任务完成
 type reportMsg struct {
-	request *kvraft.ReportRequest
-	ok      chan struct{}
+	request    *kvraft.ReportRequest
+	ok         chan struct{}
+	WorkerUUID string
 }
 
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) Heartbeat(request *kvraft.HeartbeatRequest, response *kvraft.HeartbeatResponse) error {
-	msg := heartbeatMsg{response, make(chan struct{})}
+	msg := heartbeatMsg{response, make(chan struct{}), request.WorkerUUID}
 	c.heartbeatCh <- msg
 	<-msg.ok
 	return nil
 }
 
 func (c *Coordinator) Report(request *kvraft.ReportRequest, response *kvraft.ReportResponse) error {
-	msg := reportMsg{request, make(chan struct{})}
+	msg := reportMsg{request, make(chan struct{}), request.WorkerUUID}
 	c.reportCh <- msg
 	<-msg.ok
 	return nil
@@ -66,6 +72,10 @@ func (c *Coordinator) schedule() {
 	for {
 		select {
 		case msg := <-c.heartbeatCh:
+			// register workerUUID
+			c.mapMutex.Lock()
+			c.WorkersExistMap[msg.WorkerUUID] = time.Now()
+			c.mapMutex.Unlock()
 			// 请求任务, 不用加锁遍历任务
 			fmt.Println("worker拿到任务了")
 			// 1 => 遍历任务, 查看哪些任务是可以拿去执行的
@@ -76,13 +86,13 @@ func (c *Coordinator) schedule() {
 				// 发放Reduce任务之前, 先检查是否完成了所有的Reduce任务
 				if c.resReduce == c.nReduce {
 					res.JobType = 4
-					log.Println("Reduce任务完成, Coordinator即将退出")
+					log.Println("Reduce任务完成, Notice Worker Exit")
 					msg.ok <- struct{}{}
 					break
 				}
 				flag := false
 				for _, task := range c.tasks[:c.nReduce] {
-					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10 * time.Second) {
+					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10*time.Second) {
 						task.StartTime = time.Now()
 						res.Job = task
 						res.JobType = 2
@@ -98,7 +108,7 @@ func (c *Coordinator) schedule() {
 				// 发放Map任务
 				flag := false
 				for _, task := range c.tasks[c.nReduce:] {
-					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10 * time.Second) {
+					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10*time.Second) {
 						task.StartTime = time.Now()
 						res.Job = task
 						res.JobType = 1
@@ -115,6 +125,10 @@ func (c *Coordinator) schedule() {
 		case msg := <-c.reportCh:
 			// TODO 完成任务
 			req := msg.request
+			// register workerUUID
+			c.mapMutex.Lock()
+			c.WorkersExistMap[msg.WorkerUUID] = time.Now()
+			c.mapMutex.Unlock()
 			if !TaskPreCheck(req.Job) {
 				msg.ok <- struct{}{}
 				break
@@ -179,27 +193,47 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Your code here.
 	// TODO 初始化一些配置
+
 	c.nReduce = nReduce
 	for i := 0; i < nReduce; i++ {
 		c.tasks = append(c.tasks, kvraft.Task{
-			Id: i,
-			Status:   0,
-			NReduce:  nReduce,
+			Id:      i,
+			Status:  0,
+			NReduce: nReduce,
 		})
 	}
-	for idx, fname := range files {
+	for _, fname := range files {
 		c.tasks = append(c.tasks, kvraft.Task{
-			Id:       idx + len(c.tasks),
+			Id:       len(c.tasks),
 			FileName: fname,
 			Status:   0,
 			NReduce:  nReduce,
 		})
 		c.nMap++
 	}
+	c.WorkersExistMap = make(map[string]time.Time)
 	c.heartbeatCh = make(chan heartbeatMsg)
 	c.reportCh = make(chan reportMsg)
 	c.doneCh = make(chan struct{})
 	go c.schedule()
+	go func() {
+		timer := time.Tick(5 * time.Second)
+		for range timer {
+			c.mapMutex.Lock()
+			canExist := false
+			for _, startTime := range c.WorkersExistMap {
+				if time.Now().Sub(startTime) >= 10*time.Second {
+					canExist = true
+				}
+			}
+			c.mapMutex.Unlock()
+			if canExist {
+				log.Println("All Worker exist, Current Coordinator can exist")
+				c.doneCh <- struct{}{}
+				return
+			}
+		}
+	}()
 	c.server()
 	return &c
 }

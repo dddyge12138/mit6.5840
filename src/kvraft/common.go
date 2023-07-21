@@ -37,6 +37,7 @@ type GetReply struct {
 }
 
 type HeartbeatRequest struct {
+	WorkerUUID string
 }
 
 type HeartbeatResponse struct {
@@ -46,13 +47,18 @@ type HeartbeatResponse struct {
 }
 
 type ReportRequest struct {
-	JobType 		int
-	Job     		Task
+	JobType int
+	Job     Task
 	// Map任务完成时, 回复Coordinator有多少个Reduce File
-	ReduceFileName 	string
+	ReduceFileName string
+	WorkerUUID     string
 }
 
 type ReportResponse struct {
+}
+
+type RegisterRequest struct {
+	WorkerUUID string
 }
 
 type Task struct {

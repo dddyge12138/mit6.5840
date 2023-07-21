@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"time"
 )
 import "log"
@@ -27,6 +29,8 @@ type ByKey []KeyValue
 func (a ByKey) Len() int           { return len(a) }
 func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
+
+var LocalWorkerUUID string
 
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
@@ -83,7 +87,7 @@ func doReduce(job kvraft.Task, reducef func(string, []string) string) {
 	}
 
 	// report completed job
-	err = ReportTask(&kvraft.ReportRequest{JobType: 2, Job: job}, &kvraft.ReportResponse{})
+	err = ReportTask(&kvraft.ReportRequest{JobType: 2, Job: job, WorkerUUID: LocalWorkerUUID}, &kvraft.ReportResponse{})
 	if err != nil {
 		log.Fatalf(err.Error())
 	}
@@ -140,8 +144,9 @@ func doMap(job kvraft.Task, mapf func(string, string) []KeyValue) {
 
 	// 4 => 全部执行成功了, 请求RPC接口报告成功完成任务
 	err = ReportTask(&kvraft.ReportRequest{
-		JobType: 1,
-		Job: job,
+		JobType:    1,
+		Job:        job,
+		WorkerUUID: LocalWorkerUUID,
 	}, &kvraft.ReportResponse{})
 	if err != nil {
 		log.Fatalf(err.Error())
@@ -153,6 +158,9 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
+
+	// TODO Pre: Register WorkerUUID To Coordinator
+	LocalWorkerUUID = strconv.Itoa(rand.Intn(1e9))
 
 	/**  开始索取任务    **/
 	// 1 => 轮训请求任务, 如果没有任务就睡眠, 按照任务类型执行不同的行为
@@ -194,7 +202,7 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 func CallTask() (*kvraft.HeartbeatResponse, error) {
-	args := kvraft.HeartbeatRequest{}
+	args := kvraft.HeartbeatRequest{WorkerUUID: LocalWorkerUUID}
 	reply := kvraft.HeartbeatResponse{}
 	err := call("Coordinator.Heartbeat", &args, &reply)
 	fmt.Println(reply)
