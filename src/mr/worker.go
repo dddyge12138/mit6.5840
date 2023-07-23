@@ -174,24 +174,24 @@ func Worker(mapf func(string, string) []KeyValue,
 			log.Println("我拿到Map任务啦")
 			// 执行Map任务
 			doMap(reply.Job, mapf)
-			fmt.Println("执行完了doMap，休息20秒钟继续")
-			time.Sleep(1 * time.Second)
+			//fmt.Println("执行完了doMap，休息20秒钟继续")
+			//time.Sleep(1 * time.Second)
 		case 2:
 			log.Println("我拿到Reduce任务啦")
 			// TODO 执行Reduce任务
 			doReduce(reply.Job, reducef)
-			fmt.Println("执行完了doReduce, 休息20秒钟继续")
-			time.Sleep(1 * time.Second)
+			//fmt.Println("执行完了doReduce, 休息20秒钟继续")
+			//time.Sleep(1 * time.Second)
 		case 3:
-			log.Println("我没拿到任务, 睡眠5秒后再次请求")
-			time.Sleep(5 * time.Second)
+			log.Println("我没拿到任务, 睡眠1秒后再次请求")
+			time.Sleep(1 * time.Second)
 		case 4:
 			log.Println("任务都做完了, 没任务了, 那我退出")
 			os.Exit(1000)
 		default:
 			log.Println("不认识的任务类型")
 		}
-		time.Sleep(1 * time.Second)
+		//time.Sleep(1 * time.Second)
 	}
 
 	/*****************************/

@@ -17,7 +17,7 @@ type Coordinator struct {
 	// nMap表示有多少个输入文件, 就有多少个map任务, 当resMaps == nMap时, 发放Reduce任务
 	nMap  int
 	files []string
-	tasks []kvraft.Task
+	tasks []*kvraft.Task
 	// 完成了多少个map任务就+1, 当resMaps == nMap时, 任务完成, 可以分发Reduce任务
 	resMaps int
 	// 当resReduce == nReduce说明任务聚合完成, 可以退出Coordinator
@@ -92,9 +92,10 @@ func (c *Coordinator) schedule() {
 				}
 				flag := false
 				for _, task := range c.tasks[:c.nReduce] {
-					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10*time.Second) {
+					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 2 * time.Second) {
 						task.StartTime = time.Now()
-						res.Job = task
+						task.Status = 1
+						res.Job = *task
 						res.JobType = 2
 						flag = true
 						break
@@ -108,9 +109,10 @@ func (c *Coordinator) schedule() {
 				// 发放Map任务
 				flag := false
 				for _, task := range c.tasks[c.nReduce:] {
-					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 10*time.Second) {
+					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 2 * time.Second) {
 						task.StartTime = time.Now()
-						res.Job = task
+						task.Status = 1
+						res.Job = *task
 						res.JobType = 1
 						flag = true
 						break
@@ -196,14 +198,14 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c.nReduce = nReduce
 	for i := 0; i < nReduce; i++ {
-		c.tasks = append(c.tasks, kvraft.Task{
+		c.tasks = append(c.tasks, &kvraft.Task{
 			Id:      i,
 			Status:  0,
 			NReduce: nReduce,
 		})
 	}
 	for _, fname := range files {
-		c.tasks = append(c.tasks, kvraft.Task{
+		c.tasks = append(c.tasks, &kvraft.Task{
 			Id:       len(c.tasks),
 			FileName: fname,
 			Status:   0,
@@ -217,12 +219,12 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.doneCh = make(chan struct{})
 	go c.schedule()
 	go func() {
-		timer := time.Tick(5 * time.Second)
+		timer := time.Tick(1 * time.Second)
 		for range timer {
 			c.mapMutex.Lock()
 			canExist := false
 			for _, startTime := range c.WorkersExistMap {
-				if time.Now().Sub(startTime) >= 10*time.Second {
+				if time.Now().Sub(startTime) >= 5*time.Second {
 					canExist = true
 				}
 			}
