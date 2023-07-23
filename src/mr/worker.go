@@ -160,7 +160,8 @@ func Worker(mapf func(string, string) []KeyValue,
 	// Your worker implementation here.
 
 	// TODO Pre: Register WorkerUUID To Coordinator
-	LocalWorkerUUID = strconv.Itoa(rand.Intn(1e9))
+	//LocalWorkerUUID = strconv.Itoa(rand.Intn(1e9))
+	LocalWorkerUUID = strconv.Itoa(os.Getpid())
 
 	/**  开始索取任务    **/
 	// 1 => 轮训请求任务, 如果没有任务就睡眠, 按照任务类型执行不同的行为

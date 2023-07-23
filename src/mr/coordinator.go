@@ -223,13 +223,16 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		for range timer {
 			c.mapMutex.Lock()
 			canExist := false
+			sum := len(c.WorkersExistMap)
+			cnt := 0
 			for _, startTime := range c.WorkersExistMap {
 				if time.Now().Sub(startTime) >= 5*time.Second {
 					canExist = true
+					cnt++
 				}
 			}
 			c.mapMutex.Unlock()
-			if canExist {
+			if cnt != 0 && sum == cnt && canExist {
 				log.Println("All Worker exist, Current Coordinator can exist")
 				c.doneCh <- struct{}{}
 				return
