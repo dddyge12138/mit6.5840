@@ -4,6 +4,7 @@ import (
 	"6.5840/kvraft"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 )
@@ -92,7 +93,7 @@ func (c *Coordinator) schedule() {
 				}
 				flag := false
 				for _, task := range c.tasks[:c.nReduce] {
-					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 2 * time.Second) {
+					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) >= 10*time.Second) {
 						task.StartTime = time.Now()
 						task.Status = 1
 						res.Job = *task
@@ -109,7 +110,7 @@ func (c *Coordinator) schedule() {
 				// 发放Map任务
 				flag := false
 				for _, task := range c.tasks[c.nReduce:] {
-					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) > 2 * time.Second) {
+					if task.Status == 0 || (task.Status == 1 && time.Now().Sub(task.StartTime) >= 10*time.Second) {
 						task.StartTime = time.Now()
 						task.Status = 1
 						res.Job = *task
@@ -164,10 +165,10 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", "localhost:1234")
-	//sockname := coordinatorSock()
-	//os.Remove(sockname)
-	//l, e := net.Listen("unix", sockname)
+	// l, e := net.Listen("tcp", "localhost:1234")
+	sockname := coordinatorSock()
+	os.Remove(sockname)
+	l, e := net.Listen("unix", sockname)
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
@@ -226,7 +227,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			sum := len(c.WorkersExistMap)
 			cnt := 0
 			for _, startTime := range c.WorkersExistMap {
-				if time.Now().Sub(startTime) >= 5*time.Second {
+				if time.Now().Sub(startTime) >= 20*time.Second {
 					canExist = true
 					cnt++
 				}

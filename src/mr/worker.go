@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -45,9 +44,10 @@ func doReduce(job kvraft.Task, reducef func(string, []string) string) {
 	intermidiate := []KeyValue{}
 
 	fileNames, err := filepath.Glob(fmt.Sprintf("mr-*-%d", job.Id))
-	if err != nil || len(fileNames) == 0 {
-		log.Fatalf("No matching files found: %s", fmt.Sprintf("mr-*-%d.txt", job.Id))
-	}
+	//	if err != nil || len(fileNames) == 0 {
+	// fix: mtiming.go test: This place can not exit because Map Task may have none result
+	// log.Fatalf("No matching files found: %s", fmt.Sprintf("mr-*-%d.txt", job.Id))
+	//	}
 
 	for _, fname := range fileNames {
 		file, err := os.Open(fname)
@@ -255,9 +255,9 @@ func CallExample() {
 // usually returns true.
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
-	c, err := rpc.DialHTTP("tcp", "localhost:1234")
-	//sockname := coordinatorSock()
-	//c, err := rpc.DialHTTP("unix", sockname)
+	//c, err := rpc.DialHTTP("tcp", "localhost:1234")
+	sockname := coordinatorSock()
+	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}
