@@ -71,7 +71,7 @@ func doReduce(job kvraft.Task, reducef func(string, []string) string) {
 	// feed
 	outFileName := fmt.Sprintf("mr-out-%d", job.Id)
 	ofile, _ := os.Create(outFileName)
-
+	defer ofile.Close()
 	for i := 0; i < len(intermidiate); {
 		j := i + 1
 		for j < len(intermidiate) && intermidiate[i].Key == intermidiate[j].Key {
